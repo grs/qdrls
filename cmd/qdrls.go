@@ -163,18 +163,22 @@ func main() {
 	}
 	response.Accept()
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	if top, ok := response.Value.(map[string]interface{}); ok {
-		fields := top["attributeNames"].([]interface{})
-		fmt.Fprintln(w, header(fields))
-		results := top["results"].([]interface{})
-		for _, r := range results {
-			o := r.([]interface{})
-			fmt.Fprintln(w, tabbed(o))
+	if status, ok := response.ApplicationProperties["statusCode"].(int32); ok && status == 200 {
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		if top, ok := response.Value.(map[string]interface{}); ok {
+			fields := top["attributeNames"].([]interface{})
+			fmt.Fprintln(w, header(fields))
+			results := top["results"].([]interface{})
+			for _, r := range results {
+				o := r.([]interface{})
+				fmt.Fprintln(w, tabbed(o))
+			}
+			w.Flush()
+		} else {
+			fmt.Printf("Bad response: %s\n", response.Value)
 		}
-		w.Flush()
 	} else {
-		fmt.Printf("Bad response: %s\n", response.Value)
+		fmt.Printf("ERROR: %s\n", response.ApplicationProperties["statusDescription"])
 	}
 	receiver.Close(ctx)
 }
