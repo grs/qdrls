@@ -12,65 +12,115 @@ import (
 	"pack.ag/amqp"
 )
 
-func alias(attribute string) string {
-	aliases := map[string]string {
-		"linkType":"type",
-		"linkDir":"dir",
-		"connectionId":"conn",
-		"identity":"id",
-		"owningAddr":"addr",
-		"capacity":"cpcty",
-		"linkName": "name",
-		"undeliveredCount":"undel",
-		"unsettledCount":"unsett",
-		"deliveryCount":"del",
-		"acceptedCount":"acc",
-		"releasedCount":"rel",
-		"modifiedCount":"mod",
-		"rejectedCount":"rej",
-		"presettledCount":"presett",
-		"droppedPresettledCount":"psdrop"}
-	alt := aliases[attribute]
-	if len(alt) > 0 {
-		return alt
-	} else {
-		return attribute
+type QueryHandler interface {
+	QualifiedType() string
+	AttributeNames() []interface{}
+	Header(items []interface{}) string
+	Record(items []interface{}) string
+}
+
+type Attribute struct {
+	name string
+	alias string
+}
+
+func DisplayNames(attributes []Attribute) []interface{} {
+	copy := make([]interface{}, len(attributes))
+	for i, v := range attributes {
+		if len(v.alias) > 0 {
+			copy[i] = v.alias
+		} else {
+			copy[i] = v.name
+		}
 	}
+	return copy[:]
 }
 
-func defaultAttributes(typename string) []interface{} {
-	linkAttributes := [...]interface{} {"linkType", "linkDir", "connectionId", "identity", "peer", "owningAddr", "capacity", "undeliveredCount", "unsettledCount", "deliveryCount", "acceptedCount", "releasedCount", "modifiedCount", "rejectedCount", "presettledCount", "droppedPresettledCount"}
-	return linkAttributes[:]
+func DisplayName(name string, attributes []Attribute) string {
+	for _, v := range attributes {
+		if name == v.name {
+			if len(v.alias) > 0 {
+				return v.alias
+			} else {
+				return v.name
+			}
+		}
+	}
+	return name
 }
 
-func attributeNames(specified string, typename string) []interface{} {
-	if len(specified) > 0 {
-		list := strings.Split(specified, ",")
-		copy := make([]interface{}, len(list))
+func RealNames(attributes []Attribute) []interface{} {
+	copy := make([]interface{}, len(attributes))
+	for i, v := range attributes {
+		copy[i] = v.name
+	}
+	return copy[:]
+}
+
+func DefaultLinkAttributes() []Attribute {
+	return []Attribute{
+		{"linkType","type"},
+		{"linkDir","dir"},
+		{"connectionId","conn"},
+		{"identity","id"},
+		{"owningAddr","addr"},
+		{"capacity","cpcty"},
+		{"linkName", "name"},
+		{"undeliveredCount","undel"},
+		{"unsettledCount","unsett"},
+		{"deliveryCount","del"},
+		{"acceptedCount","acc"},
+		{"releasedCount","rel"},
+		{"modifiedCount","mod"},
+		{"rejectedCount","rej"},
+		{"presettledCount","presett"},
+		{"droppedPresettledCount","psdrop"}}
+}
+
+func DefaultAddressAttributes() []Attribute {
+	return []Attribute{
+		{"key", "addr"},
+		{"distribution", "distrib"},
+		{"priority", "pri"},
+		{"subscriberCount", "local"},
+		{"remoteCount", "remote"},
+		{"deliveriesEgress", "out"},
+		{"deliveriesIngress", "in"},
+		{"deliveriesTransit", "thru"}}
+}
+
+func GetAttribute(name string, attributes []Attribute) Attribute {
+	for _, v := range attributes {
+		if v.name == name || v.alias == name {
+			return v
+		}
+	}
+	return Attribute{name:name}
+}
+
+func GetAttributes(selected string, all []Attribute, defaults []Attribute) []Attribute {
+	if len(selected) > 0 {
+		list := strings.Split(selected, ",")
+		copy := make([]Attribute, len(list))
 		for i, v := range list {
-			copy[i] = v
+			copy[i] = GetAttribute(v, all)
 		}
 		return copy[:]
 	} else {
-		return defaultAttributes(typename)
+		return defaults
 	}
 }
 
-func qualifiedType(typename string) string {
-	if typename == "link" || typename == "address" {
-		return fmt.Sprintf("org.apache.qpid.dispatch.router.%s",  typename)
-	} else {
-		return fmt.Sprintf("org.apache.qpid.dispatch.%s",  typename)
-	}
+func (h DefaultQueryHandler) AttributeNames() []interface{} {
+	return RealNames(h.attributes)
 }
 
-func divider(items []interface{}) string {
-	s := make([]string, len(items))
-	for i := range items {
-		o := alias(fmt.Sprintf("%s", items[i]))
-		s[i] = strings.Repeat("=", len(o))
-	}
-	return strings.Join(s, "\t")
+func (h *DefaultQueryHandler) SetSelectedAttributes(selected string) {
+	h.attributes = GetAttributes(selected, h.defaultAttributes, h.defaultAttributes)
+}
+
+func (h DefaultQueryHandler) QualifiedType() string {
+	return h.typename
 }
 
 func stringify(items []interface{}) []string {
@@ -81,17 +131,48 @@ func stringify(items []interface{}) []string {
 	return s
 }
 
-func tabbed(items []interface{}) string {
+func (h DefaultQueryHandler) Record(items []interface{}) string {
 	s := stringify(items)
 	return strings.Join(s, "\t")
 }
 
-func header(items []interface{}) string {
+func (h DefaultQueryHandler) Header(items []interface{}) string {
 	s := stringify(items)
 	for i, v := range s {
-		s[i] = strings.ToUpper(alias(v))
+		s[i] = strings.ToUpper(DisplayName(v, h.attributes))
 	}
 	return strings.Join(s, "\t")
+}
+
+type Entity struct {
+	typename string
+	alias string
+	defaultAttributes []Attribute
+}
+
+type DefaultQueryHandler struct {
+	Entity
+	attributes []Attribute
+}
+
+func GetType(typename string) Entity {
+	entities := []Entity {
+		{"org.apache.qpid.dispatch.router.link", "link", DefaultLinkAttributes()},
+		{"org.apache.qpid.dispatch.router.address", "address", DefaultAddressAttributes()},
+	}
+	for _, e := range(entities) {
+		if typename == e.typename || typename == e.alias {
+			return e
+		}
+	}
+	return Entity{typename:typename}
+}
+
+func getQueryHandler(typename string, attributes string) QueryHandler {
+	var handler DefaultQueryHandler
+	handler.Entity = GetType(typename)
+	handler.SetSelectedAttributes(attributes)
+	return handler
 }
 
 func authOption(username string, password string) amqp.ConnOption {
@@ -145,9 +226,10 @@ func main() {
 	request.Properties = &properties
 	request.ApplicationProperties = make(map[string]interface{})
 	request.ApplicationProperties["operation"] = "QUERY"
-	request.ApplicationProperties["entityType"] = qualifiedType(*typename)
+	handler := getQueryHandler(*typename, *attributes)
+	request.ApplicationProperties["entityType"] = handler.QualifiedType()
 	var body = make(map[string]interface{})
-	body["attributeNames"] = attributeNames(*attributes, *typename)
+	body["attributeNames"] = handler.AttributeNames()
 	request.Value = body
 
 	err = sender.Send(ctx, &request)
@@ -167,11 +249,11 @@ func main() {
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		if top, ok := response.Value.(map[string]interface{}); ok {
 			fields := top["attributeNames"].([]interface{})
-			fmt.Fprintln(w, header(fields))
+			fmt.Fprintln(w, handler.Header(fields))
 			results := top["results"].([]interface{})
 			for _, r := range results {
 				o := r.([]interface{})
-				fmt.Fprintln(w, tabbed(o))
+				fmt.Fprintln(w, handler.Record(o))
 			}
 			w.Flush()
 		} else {
